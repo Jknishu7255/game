@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Simple Mind Game (Simon)</title>
+  <style>
+    :root{
+      --bg:#0f1724;
+      --card:#0b1220;
+      --accent:#06b6d4;
+      --glass: rgba(255,255,255,0.05);
+      font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      min-height:100vh;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      background:linear-gradient(180deg,var(--bg),#071026);
+      color:#e6eef8;
+      padding:24px;
+    }
+    .board{
+      width:360px;
+      background:linear-gradient(180deg,var(--card), #071018);
+      border-radius:16px;
+      padding:20px;
+      box-shadow: 0 8px 30px rgba(2,6,23,0.7);
+      display:flex;
+      flex-direction:column;
+      gap:16px;
+      align-items:center;
+    }
+    h1{margin:0;font-size:18px;letter-spacing:0.6px}
+    .status{
+      display:flex;
+      width:100%;
+      justify-content:space-between;
+      align-items:center;
+      gap:12px;
+    }
+    .score{
+      background:var(--glass);
+      padding:8px 12px;
+      border-radius:10px;
+      font-weight:600;
+      font-size:14px;
+      min-width:72px;
+      text-align:center;
+    }
+    .controls{display:flex;gap:8px}
+    button{
+      background:transparent;
+      border:1px solid rgba(255,255,255,0.06);
+      color:inherit;
+      padding:8px 12px;
+      border-radius:10px;
+      cursor:pointer;
+      font-weight:600;
+      letter-spacing:0.4px;
+    }
+    .grid{
+      width:100%;
+      display:grid;
+      grid-template-columns:repeat(2,1fr);
+      gap:12px;
+      margin-top:6px;
+    }
+    .pad{
+      aspect-ratio:1/1;
+      border-radius:12px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      font-weight:700;
+      font-size:18px;
+      color:rgba(0,0,0,0.6);
+      user-select:none;
+      cursor:pointer;
+      transition:transform .12s ease, filter .12s ease;
+      box-shadow: 0 6px 18px rgba(2,6,23,0.6), inset 0 -6px 24px rgba(255,255,255,0.02);
+    }
+    .pad:active{transform:scale(.98)}
+    .pad.flash{ filter:brightness(1.45) saturate(1.1); transform:scale(1.03)}
+    .pad.green{ background:linear-gradient(180deg,#34d399,#10b981); color:#04372b }
+    .pad.red{ background:linear-gradient(180deg,#f87171,#ef4444); color:#2b0303 }
+    .pad.yellow{ background:linear-gradient(180deg,#facc15,#f59e0b); color:#3a2b00 }
+    .pad.blue{ background:linear-gradient(180deg,#60a5fa,#3b82f6); color:#07183a }
+    .message{
+      font-size:13px;
+      opacity:0.9;
+      text-align:center;
+      min-height:18px;
+    }
+    .footer{font-size:12px; color:rgba(230,238,248,0.66)}
+    .small{font-size:12px; opacity:0.9}
+  </style>
+</head>
+<body>
+  <div class="board" role="application" aria-label="Simon-like mind game">
+    <h1>Simple Mind Game — Repeat the Sequence</h1>
+
+    <div class="status">
+      <div class="score">Level: <span id="level">0</span></div>
+      <div class="controls">
+        <button id="startBtn">Start</button>
+        <button id="strictBtn">Strict: <span id="strictState">Off</span></button>
+      </div>
+    </div>
+
+    <div class="grid" id="grid">
+      <div class="pad green" data-color="green">Green</div>
+      <div class="pad red"   data-color="red">Red</div>
+      <div class="pad yellow"data-color="yellow">Yellow</div>
+      <div class="pad blue"  data-color="blue">Blue</div>
+    </div>
+
+    <div class="message" id="message">Press Start to begin. Watch the pattern and repeat it.</div>
+    <div class="footer small">Tip: Try to memorize the sequence — it grows each round.</div>
+  </div>
+
+  <script>
+    // Simple Simon-like game logic (vanilla JS)
+    (function(){
+      const pads = {
+        green: document.querySelector('.pad.green'),
+        red: document.querySelector('.pad.red'),
+        yellow: document.querySelector('.pad.yellow'),
+        blue: document.querySelector('.pad.blue'),
+      };
+      const padOrder = ['green','red','yellow','blue'];
+      const startBtn = document.getElementById('startBtn');
+      const strictBtn = document.getElementById('strictBtn');
+      const strictStateSpan = document.getElementById('strictState');
+      const levelEl = document.getElementById('level');
+      const messageEl = document.getElementById('message');
+
+      let sequence = [];
+      let playerIndex = 0;
+      let playing = false;
+      let acceptingInput = false;
+      let level = 0;
+      let strict = false;
+
+      // small helper: sleep
+      const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+      function resetGame(){
+        sequence = [];
+        playerIndex = 0;
+        level = 0;
+        updateLevel();
+      }
+
+      function updateLevel(){
+        levelEl.textContent = level;
+      }
+
+      function randomColor(){
+        return padOrder[Math.floor(Math.random()*padOrder.length)];
+      }
+
+      // flash a pad visually (and optionally play a tone)
+      async function flashPad(color, time=450){
+        const el = pads[color];
+        if(!el) return;
+        el.classList.add('flash');
+        // optionally play short beep using WebAudio API
+        try{
+          const ctx = new (window.AudioContext || window.webkitAudioContext)();
+          const o = ctx.createOscillator();
+          const g = ctx.createGain();
+          o.type = 'sine';
+          // different frequencies per color
+          const freqs = {green:520, red:330, yellow:660, blue:420};
+          o.frequency.value = freqs[color] || 440;
+          o.connect(g); g.connect(ctx.destination);
+          g.gain.value = 0.02;
+          o.start();
+          await sleep(time-40);
+          o.stop();
+          ctx.close();
+        }catch(e){
+          // audio may be blocked - ignore
+        }
+        await sleep(0);
+        el.classList.remove('flash');
+      }
+
+      // play the full sequence to the player
+      async function playSequence(){
+        acceptingInput = false;
+        messageEl.textContent = "Watch the sequence...";
+        await sleep(300);
+        for(const color of sequence){
+          await flashPad(color, 500);
+          await sleep(220);
+        }
+        acceptingInput = true;
+        playerIndex = 0;
+        messageEl.textContent = "Your turn — repeat the sequence.";
+      }
+
+      // advance to next round
+      async function nextRound(){
+        level++;
+        updateLevel();
+        sequence.push(randomColor());
+        await sleep(350);
+        await playSequence();
+      }
+
+      // called when player clicks a pad
+      async function handlePlayerInput(color){
+        if(!playing || !acceptingInput) return;
+        // provide immediate feedback
+        flashPad(color, 220);
+        // check correctness
+        if(color === sequence[playerIndex]){
+          playerIndex++;
+          if(playerIndex === sequence.length){
+            // round complete
+            acceptingInput = false;
+            messageEl.textContent = "Good! Preparing next round...";
+            await sleep(700);
+            await nextRound();
+          } else {
+            // still more to go
+          }
+        } else {
+          // mistake
+          acceptingInput = false;
+          messageEl.textContent = "Wrong! Game over.";
+          // if strict -> reset completely; else repeat same sequence
+          await sleep(800);
+          if(strict){
+            messageEl.textContent = "Strict mode: restart from level 1.";
+            resetGame();
+            await sleep(600);
+            startGame();
+          } else {
+            messageEl.textContent = "Try again — replaying the sequence.";
+            await sleep(700);
+            await playSequence();
+          }
+        }
+      }
+
+      function attachPadListeners(){
+        Object.entries(pads).forEach(([color, el])=>{
+          el.addEventListener('click', ()=> handlePlayerInput(color));
+          // also allow keyboard controls: G R Y B
+        });
+        document.addEventListener('keydown', (e)=>{
+          if(!playing) return;
+          const map = {g:'green', r:'red', y:'yellow', b:'blue', G:'green', R:'red', Y:'yellow', B:'blue'};
+          const c = map[e.key];
+          if(c && acceptingInput) handlePlayerInput(c);
+        });
+      }
+
+      function startGame(){
+        resetGame();
+        playing = true;
+        messageEl.textContent = "Game started. Watch carefully.";
+        // small initial sequence (1)
+        nextRound();
+      }
+
+      // wire up controls
+      startBtn.addEventListener('click', ()=>{
+        if(!playing){
+          startGame();
+          startBtn.textContent = 'Restart';
+        } else {
+          // if already playing, confirm restart
+          if(confirm('Restart the game?')){
+            startGame();
+          }
+        }
+      });
+
+      strictBtn.addEventListener('click', ()=>{
+        strict = !strict;
+        strictStateSpan.textContent = strict ? 'On' : 'Off';
+        strictBtn.style.borderColor = strict ? 'rgba(6,182,212,0.9)' : 'rgba(255,255,255,0.06)';
+      });
+
+      // initialize
+      attachPadListeners();
+      messageEl.textContent = "Press Start to begin. Watch the pattern and repeat it.";
+      updateLevel();
+
+    })();
+  </script>
+</body>
+</html>
